@@ -1,0 +1,3 @@
+steps:
+  - name: ":python:"
+    command: "docker build . -t adarsh:LATEST"
