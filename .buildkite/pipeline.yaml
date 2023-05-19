@@ -4,7 +4,7 @@ steps:
   - name: "copy s3 content"
     commands: 
       - "mkdir s3"
-      - "aws s3 cp s3://adarsh-code-source-bucket-2/j/ ./s3 --recursive"
+      - "aws s3 cp s3://adarsh-code-source-bucket-2/j/ s3 --recursive"
   - name: "docker build"
     command: "docker build . -t adarsh-repo:latest  --build-arg AWS_ACCESS_KEY_ID --build-arg AWS_SECRET_ACCESS_KEY --build-arg AWS_SESSION_TOKEN"
   - name: "login to ecr"

@@ -15,6 +15,6 @@ FROM nginx
 
 # # Copy the content from S3 to the Nginx server
 # RUN aws s3 cp s3://adarsh-code-source-bucket-2/j/ /usr/share/nginx/html/ --recursive
-COPY ./s3 /usr/share/nginx/html/
+COPY s3 /usr/share/nginx/html/
 # Expose the Nginx port
 EXPOSE 80
