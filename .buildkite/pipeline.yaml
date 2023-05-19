@@ -2,4 +2,5 @@ steps:
   - name: ":python:"
     command: "ls"
   - name: ":python:"
-    command: "sudo docker build . -t adarsh:LATEST"
+    command: "whoami"
+    # command: "sudo docker build . -t adarsh:LATEST"
