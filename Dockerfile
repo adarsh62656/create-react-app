@@ -1,7 +1,7 @@
 FROM nginx
 
 # Install the AWS Command Line Interface (CLI)
-RUN apt-get update && apt-get install -y awscli
+# RUN apt-get update && apt-get install -y awscli
 # ARG AWS_ACCESS_KEY_ID
 # ARG AWS_SECRET_ACCESS_KEY
 # ARG AWS_SESSION_TOKEN
