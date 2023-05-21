@@ -12,7 +12,6 @@ steps:
       - "mkdir s3"
       - "aws s3 cp s3://adarsh-code-source-bucket-2/j/ s3  --recursive"
       - "docker build . -t adarsh-repo:latest"
-      - "docker image prune -a --force"
       - "rm -rf s3"
   - name: "tag image"
     command: "docker tag adarsh-repo:latest 853973692277.dkr.ecr.us-east-1.amazonaws.com/adarsh-repo:latest"
