@@ -1,4 +1,4 @@
 FROM nginx
 COPY s3 /usr/share/nginx/html
-COPY default.conf /etc/nginx/conf.d
+COPY nginx.conf /etc/nginx/
 EXPOSE 80
