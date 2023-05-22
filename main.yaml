@@ -1,0 +1,320 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: |
+  stack to host static page
+Parameters:
+  ClusterName:
+    Description: Enter the Name of the cluster
+    Type: String
+    Default: adarsh-ecs-cluster
+  ContainerNameParam:
+    Description: Enter the Name of the cluster
+    Type: String
+    Default: nginx
+  S3BucketLogging:
+    Description: Enter the Name of the logging bucket
+    Type: String
+    Default: adarsh-logs-bucket
+  VPCID:
+    Type: AWS::EC2::VPC::Id
+    Description: enter public VPC ID
+  SubnetID:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: enter public subnet ID
+# Metadata:
+  
+# Mappings:
+  
+# Conditions:
+  
+Resources:
+  MyCluster:
+    Type: AWS::ECS::Cluster
+    Properties: 
+      CapacityProviders: 
+        - FARGATE
+      ClusterName: !Ref ClusterName
+      ClusterSettings: 
+        - Name: containerInsights
+          Value: enabled
+  DemoTaskdefinationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+              - ecs.amazonaws.com
+              - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Description: Role for Task Defination
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      RoleName: adarsh-Demo-task-defination-role-cf
+
+  DemoTaskdefination:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        -
+          DisableNetworking: false
+          Essential: true
+          Image: 853973692277.dkr.ecr.us-east-1.amazonaws.com/adarsh-repo:latest
+          Interactive: false
+          Name: !Ref ContainerNameParam
+          PortMappings: 
+            - AppProtocol: http
+              ContainerPort: 80
+              HostPort: 80
+              Name: nginx-80-http
+              Protocol: tcp
+      Cpu: 2048
+      ExecutionRoleArn: {"Fn::GetAtt": ['DemoTaskdefinationRole','Arn']}
+      Memory: 4096
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: "x86-64"
+        OperatingSystemFamily: "LINUX"
+      TaskRoleArn: {"Fn::GetAtt": ['DemoTaskdefinationRole','Arn']}
+  
+  DemoService:
+    DependsOn: MyLoadBalancer
+    Type: AWS::ECS::Service
+    Properties:
+      # ServiceConnectConfiguration:
+      #   Enabled: true
+      #   LogConfiguration:
+      #     LogDriver: awslogs
+      CapacityProviderStrategy:
+        - Base: 0
+          CapacityProvider: FARGATE
+          Weight: 1
+      Cluster: !Ref ClusterName
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      DeploymentController:
+        Type: ECS
+      DesiredCount: 1
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref SubnetID
+          SecurityGroups:
+            - Ref: DemoECSSecurityGroup
+          AssignPublicIp: ENABLED
+      PropagateTags: TASK_DEFINITION
+      SchedulingStrategy: REPLICA
+      LoadBalancers:
+        - ContainerName: !Ref ContainerNameParam
+          ContainerPort: 80
+          TargetGroupArn: !Ref MyTargetGroup
+      ServiceName: adarsh-nginx-service-from-cf
+      Tags: 
+        - Key: createdby
+          Value: adarsh-cf
+      TaskDefinition:
+        Ref: DemoTaskdefination
+  
+  DemoECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP traffic from ECS service 
+      VpcId: !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref MyLbSecurityGrp
+  
+  MeetingsNetworkRxBytes:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: !Sub "Meetings service's Number of bytes received from resource"
+      AlarmName: !Sub adarsh-meetings-network-rx-bytes-alarm
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+      - Name: ClusterName
+        Value: !Ref ClusterName
+      - Name: ServiceName
+        Value: !GetAtt DemoService.Name
+      EvaluationPeriods: 1
+      MetricName: NetworkRxBytes
+      Namespace: ECS/ContainerInsights
+      OKActions:
+      - !Ref AdarshScaleInPolicy
+      AlarmActions:
+      - !Ref AdarshScaleOutPolicy
+      Statistic: Sum
+      Threshold: 2000
+      Period: 60
+      TreatMissingData: breaching
+
+  AdarshAutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [application-autoscaling.amazonaws.com]
+          Action: ["sts:AssumeRole"]
+      Path: /
+      Policies:
+      - PolicyName: service-autoscaling
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: ["application-autoscaling:*", "cloudwatch:*","ecs:DescribeServices", "ecs:UpdateService"]
+            Resource: "*"
+
+  AdarshScaleOutPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: ecs-fargate-scale-out-policy
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref AdarshScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 1500
+        MetricAggregationType: Maximum
+        StepAdjustments:
+          - MetricIntervalLowerBound: 0
+            ScalingAdjustment: 1
+
+  AdarshScaleInPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: ecs-fargate-scale-in-policy
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref AdarshScalableTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 300
+        MetricAggregationType: Maximum
+        StepAdjustments:
+          - MetricIntervalUpperBound: 0
+            ScalingAdjustment: -1
+
+  AdarshScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 20
+      MinCapacity: 1
+      RoleARN: {"Fn::GetAtt": ['AdarshAutoScalingRole','Arn']}
+      ServiceNamespace: ecs
+      ScalableDimension: ecs:service:DesiredCount
+      ResourceId: !Join
+      - '/'
+      - - 'service'
+        - !Ref ClusterName
+        - !GetAtt DemoService.Name
+  
+  MyLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      Name: Adarsh-Loadbalancer
+      Scheme: internet-facing
+      SecurityGroups: 
+        - !GetAtt MyLbSecurityGrp.GroupId
+      Subnets: !Ref SubnetID
+      # Tags: 
+      #   - Tag
+      Type: application
+
+  MyLbSecurityGrp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPCID
+      GroupDescription: Allow HTTP traffic
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  MyTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckEnabled: true
+      Name: MyECSTargets
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPCID
+      Port: 80
+  
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref MyTargetGroup
+      LoadBalancerArn: !Ref MyLoadBalancer
+      Port: 80
+      Protocol: HTTP
+  ListenerRule1:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref MyTargetGroup
+      Conditions:
+        - Field: query-string
+          QueryStringConfig:
+            Values:
+              - Key: query
+                Value: home
+      ListenerArn: !Ref ALBListener
+      Priority: 1
+  
+
+  CFDistribution:
+    Type: 'AWS::CloudFront::Distribution'
+    # DependsOn:
+    #   - CFOriginAccessIdentity
+    Properties:
+      DistributionConfig:
+        Origins:
+          - DomainName: !GetAtt MyLoadBalancer.DNSName
+            Id: Page-LoadBalancer
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+              HTTPPort: 80
+              HTTPSPort: 443
+        Enabled: 'true'
+        DefaultCacheBehavior:
+          AllowedMethods:
+          - GET
+          - HEAD
+          - OPTIONS
+          TargetOriginId: Page-LoadBalancer
+          ForwardedValues:
+            QueryString: true
+            QueryStringCacheKeys:
+              - query
+
+          # CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          #OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
+          ViewerProtocolPolicy: redirect-to-https
+        PriceClass: PriceClass_All
+        Logging:
+          Bucket: !Join
+                    - "."
+                    - - !Ref S3BucketLogging
+                      - 's3'
+                      - !Ref 'AWS::Region'
+                      - amazonaws
+                      - com
+          Prefix: 'cloudfront-access-logs-ecs'
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+          MinimumProtocolVersion: 'TLSv1.2_2021'
+
+# Transform:
+  
+# Outputs:
